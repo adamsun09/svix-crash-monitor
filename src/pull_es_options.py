@@ -220,6 +220,20 @@ def is_transient_databento_error(error):
     return isinstance(error, (db.common.error.BentoError, requests.exceptions.RequestException))
 
 
+def is_unresolved_session_error(error):
+    """Databento has the data but has not yet mapped the symbols for a session.
+
+    The most recent session's symbology can lag the data by a day or more;
+    every query for it then fails with HTTP 422 ``symbology_invalid_request``
+    ("None of the symbols could be resolved"). That is not a bad query: the
+    session is skipped for now and the next run, whose window still covers
+    it, fills it in.
+    """
+    import databento as db
+
+    return isinstance(error, db.common.error.BentoClientError) and "symbology_invalid_request" in str(error)
+
+
 def with_retry(call, *args, **kwargs):
     """Call a Databento client method, retrying transient errors.
 
@@ -251,10 +265,16 @@ def pull_es_options(start_date=START_DATE, end_date=END_DATE, client=None):
         next_day = (pd.Timestamp(session) + pd.DateOffset(days=1)).strftime("%Y-%m-%d")
         queries = build_queries(session, next_day)
         frames = {}
-        for name, query in queries.items():
-            cost = with_retry(client.metadata.get_cost, **query)
-            assert_query_is_free(cost, what=f"({name}, {session})")
-            frames[name] = get_range_with_retry(client, query)
+        try:
+            for name, query in queries.items():
+                cost = with_retry(client.metadata.get_cost, **query)
+                assert_query_is_free(cost, what=f"({name}, {session})")
+                frames[name] = get_range_with_retry(client, query)
+        except Exception as error:
+            if not is_unresolved_session_error(error):
+                raise
+            print(f"  {session}: symbols not yet resolvable on Databento; skipped (the next run fills it in)")
+            continue
         settled = final_settlements(frames["option_statistics"])
         contracts = option_contracts(frames["option_definitions"])
         if settled.empty or contracts.empty:

@@ -26,6 +26,7 @@ import sys
 
 sys.path.insert(1, "./src/")
 
+import shlex
 import shutil
 from os import environ
 from pathlib import Path
@@ -62,15 +63,15 @@ environ["PYDEVD_DISABLE_FILE_VALIDATION"] = "1"
 # fmt: off
 ## Helper functions for automatic execution of Jupyter notebooks
 def jupyter_execute_notebook(notebook_path):
-    return f"jupyter nbconvert --execute --to notebook --ClearMetadataPreprocessor.enabled=True --inplace {notebook_path}"
+    return f"jupyter nbconvert --execute --to notebook --ClearMetadataPreprocessor.enabled=True --inplace {shlex.quote(str(notebook_path))}"
 def jupyter_to_html(notebook_path, output_dir=OUTPUT_DIR):
-    return f"jupyter nbconvert --to html --output-dir={output_dir} {notebook_path}"
+    return f"jupyter nbconvert --to html --output-dir={shlex.quote(str(output_dir))} {shlex.quote(str(notebook_path))}"
 def jupyter_to_md(notebook_path, output_dir=OUTPUT_DIR):
     """Requires jupytext"""
-    return f"jupytext --to markdown --output-dir={output_dir} {notebook_path}"
+    return f"jupytext --to markdown --output-dir={shlex.quote(str(output_dir))} {shlex.quote(str(notebook_path))}"
 def jupyter_clear_output(notebook_path):
     """Clear the output of a notebook"""
-    return f"jupyter nbconvert --ClearOutputPreprocessor.enabled=True --ClearMetadataPreprocessor.enabled=True --inplace {notebook_path}"
+    return f"jupyter nbconvert --ClearOutputPreprocessor.enabled=True --ClearMetadataPreprocessor.enabled=True --inplace {shlex.quote(str(notebook_path))}"
 # fmt: on
 
 
@@ -80,9 +81,9 @@ def mv(from_path, to_path):
     to_path = Path(to_path)
     to_path.mkdir(parents=True, exist_ok=True)
     if OS_TYPE == "nix":
-        command = f"mv {from_path} {to_path}"
+        command = f"mv {shlex.quote(str(from_path))} {shlex.quote(str(to_path))}"
     else:
-        command = f"move {from_path} {to_path}"
+        command = f'move "{from_path}" "{to_path}"'
     return command
 
 
@@ -226,12 +227,23 @@ def task_latest():
     ## `src/test_dodo.py`.
     return {
         "actions": [
-            # TODO: YOUR CODE HERE
+            "python ./src/settings.py",
+            "python ./src/pull_es_options.py --latest",
+            "python ./src/pull_fred.py",
+            "python ./src/monitor.py",
+            "python ./src/build_page.py",
         ],
         "file_dep": [
-            # TODO: YOUR CODE HERE
+            "./src/settings.py",
+            "./src/pull_es_options.py",
+            "./src/pull_fred.py",
+            "./src/monitor.py",
+            "./src/build_page.py",
+            "./src/monitor_chart.py",
+            *ENGINE,
         ],
-        # TODO: YOUR CODE HERE
+        # Never up to date: the daily update runs every time it is invoked.
+        "uptodate": [False],
         "verbosity": 2,
     }
 
@@ -421,7 +433,7 @@ def task_run_notebooks():
             "name": notebook,
             "actions": [
                 """python -c "import sys; from datetime import datetime; print(f'Start """ + notebook + """: {datetime.now()}', file=sys.stderr)" """,
-                f"jupytext --to notebook --output {notebook_path} {pyfile_path}",
+                f"jupytext --to notebook --output {shlex.quote(str(notebook_path))} {shlex.quote(str(pyfile_path))}",
                 jupyter_execute_notebook(notebook_path),
                 jupyter_to_html(notebook_path),
                 mv(notebook_path, OUTPUT_DIR),
